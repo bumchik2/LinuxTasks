@@ -61,11 +61,13 @@ struct user_info* create_user_info(char* surname, char* phone) {
         new_user_info->surname[i] = surname[i];
     }
     new_user_info->surname[strlen(surname)] = '\0';
+    printk(KERN_INFO "new surname length: %ld", strlen(surname));
     for (i = 0; i < strlen(phone); ++i) {
         new_user_info->phone[i] = phone[i];
     }
     new_user_info->phone[strlen(phone)] = '\0';
-    printk(KERN_INFO "new phone length: %ld", strlen(phone));
+    printk(KERN_INFO "new phone length: %ld", strlen(new_user_info->phone));
+    printk(KERN_INFO "new phone last char: %d", (int)(new_user_info->phone[strlen(new_user_info->phone) - 1]));
     return new_user_info;
 }
 
@@ -220,18 +222,7 @@ struct user_info* find_user_info(const char* surname) {
     }
     struct user_info* tmp = first;
     while (tmp != NULL) {
-        printk("found surname: %s, searching for: %s", tmp->surname, surname);
-        int i;
-        bool are_equal = true;
-        //if (strlen(tmp->surname) != strlen(surname)) {
-        //    are_equal = false;
-        //}
-        for (i = 0; i < strlen(tmp->surname); ++i) {
-            if (tmp->surname[i] != surname[i]) {
-                are_equal = false;
-            }
-        }
-        if (are_equal) {
+        if (strcmp(tmp->surname, surname) == 0) {
             return tmp;
         }
         tmp = tmp->next;
@@ -256,6 +247,7 @@ void get_user_info(const char* surname) {
     for (i = 0; i < strlen(result); ++i) {
         *(out_buf_end++) = result[i];
     }
+    *(out_buf_end++) = '\n';
 }
 
 void remove_user_info(struct user_info* user_info_to_remove) {
@@ -298,20 +290,24 @@ void process_in_buf(void) {
         if (first_char == 'a') { // add
             printk(KERN_INFO "processing add request");
             surname = in_buf_start;
+            surname[strcspn(surname, "\r\n")] = 0;
             strsep(&in_buf_start, " ");
             printk(KERN_INFO "adding surname %s", surname);
             phone = in_buf_start;
+            phone[strcspn(phone, "\r\n")] = 0;
             strsep(&in_buf_start, " ");
             printk(KERN_INFO "adding phone %s", phone);
             add_new_user_info(create_user_info(surname, phone));
         } else if (first_char == 'g') { // get
             printk(KERN_INFO "processing get request");
             surname = in_buf_start;
+            surname[strcspn(surname, "\r\n")] = 0;
             strsep(&in_buf_start, " ");
             get_user_info(surname);
         } else if (first_char == 'r') { // remove
             printk(KERN_INFO "processing remove request");
             surname = in_buf_start;
+            surname[strcspn(surname, "\r\n")] = 0;
             strsep(&in_buf_start, " ");
             delete_user_info(surname);
         }
