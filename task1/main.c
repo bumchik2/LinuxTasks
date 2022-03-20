@@ -52,7 +52,7 @@ struct user_info {
 struct user_info* first = NULL;
 
 struct user_info* create_user_info(char* surname, char* phone) {
-    int i;    
+    int i;
     struct user_info* new_user_info = kzalloc(sizeof(struct user_info), GFP_KERNEL);
     new_user_info->surname = kzalloc(max_surname_size, GFP_KERNEL);
     new_user_info->phone = kzalloc(max_phone_size, GFP_KERNEL);
@@ -60,11 +60,12 @@ struct user_info* create_user_info(char* surname, char* phone) {
     for (i = 0; i < strlen(surname); ++i) {
         new_user_info->surname[i] = surname[i];
     }
-    new_user_info->surname[strlen(surname)] = 0;
+    new_user_info->surname[strlen(surname)] = '\0';
     for (i = 0; i < strlen(phone); ++i) {
         new_user_info->phone[i] = phone[i];
     }
-    new_user_info->phone[strlen(phone)] = 0;
+    new_user_info->phone[strlen(phone)] = '\0';
+    printk(KERN_INFO "new phone length: %ld", strlen(phone));
     return new_user_info;
 }
 
@@ -144,10 +145,10 @@ static int __init mychardev_init(void)
 
     in_buf = kmalloc(BUF_SIZE, GFP_KERNEL);
     in_buf_start = in_buf;
-    in_buf_end = in_buf_end;
+    in_buf_end = in_buf;
     out_buf = kmalloc(BUF_SIZE, GFP_KERNEL);
     out_buf_start = out_buf;
-    out_buf_end = out_buf_end;
+    out_buf_end = out_buf;
 
     return 0;
 }
@@ -213,12 +214,73 @@ static ssize_t mychardev_read(struct file *file, char __user *buf, size_t count,
     return nbytes;
 }
 
-void get_user_info(const char* surname) {
-    // TODO
+struct user_info* find_user_info(const char* surname) {
+    if (first == NULL) {
+        return NULL;
+    }
+    struct user_info* tmp = first;
+    while (tmp != NULL) {
+        printk("found surname: %s, searching for: %s", tmp->surname, surname);
+        int i;
+        bool are_equal = true;
+        //if (strlen(tmp->surname) != strlen(surname)) {
+        //    are_equal = false;
+        //}
+        for (i = 0; i < strlen(tmp->surname); ++i) {
+            if (tmp->surname[i] != surname[i]) {
+                are_equal = false;
+            }
+        }
+        if (are_equal) {
+            return tmp;
+        }
+        tmp = tmp->next;
+    }
+    return NULL;
 }
 
-void remove_user_info(const char* surname) {
-    // TODO
+char* get_description(const struct user_info* some_user_info) {
+    return some_user_info->phone;
+}
+
+void get_user_info(const char* surname) {
+    struct user_info* target_user_info;
+    char* result;
+    int i;
+    target_user_info = find_user_info(surname);
+    if (target_user_info == NULL) {
+        result = "[No user found by surname]";
+    } else {
+        result = get_description(target_user_info);
+    }
+    for (i = 0; i < strlen(result); ++i) {
+        *(out_buf_end++) = result[i];
+    }
+}
+
+void remove_user_info(struct user_info* user_info_to_remove) {
+    if (user_info_to_remove == NULL) {
+        printk(KERN_INFO "no user info found by surname, removing nothing.");
+	return;
+    }
+    printk(KERN_INFO "deleting user with description: %s", get_description(user_info_to_remove));
+    struct user_info* tmp;
+    if (first == user_info_to_remove) {
+        tmp = first->next;
+        free_user_info(user_info_to_remove);
+        first = tmp;
+        return;
+    }
+    tmp = first;
+    while (tmp->next != user_info_to_remove) {
+        tmp = tmp->next;
+    }
+    tmp->next = user_info_to_remove->next;
+    free_user_info(user_info_to_remove);
+}
+
+void delete_user_info(const char* surname) {
+    remove_user_info(find_user_info(surname));
 }
 
 void process_in_buf(void) {
@@ -229,28 +291,32 @@ void process_in_buf(void) {
     char* surname;
     char* phone;
     char first_char;
-    while(in_buf_start != NULL) {
+    while (in_buf_start != NULL) {
+        printk(KERN_INFO "processing request: %s", in_buf_start);
         first_char = in_buf_start[0];
         strsep(&in_buf_start, " ");
         if (first_char == 'a') { // add
+            printk(KERN_INFO "processing add request");
             surname = in_buf_start;
             strsep(&in_buf_start, " ");
+            printk(KERN_INFO "adding surname %s", surname);
             phone = in_buf_start;
+            strsep(&in_buf_start, " ");
+            printk(KERN_INFO "adding phone %s", phone);
             add_new_user_info(create_user_info(surname, phone));
         } else if (first_char == 'g') { // get
+            printk(KERN_INFO "processing get request");
             surname = in_buf_start;
+            strsep(&in_buf_start, " ");
             get_user_info(surname);
         } else if (first_char == 'r') { // remove
+            printk(KERN_INFO "processing remove request");
             surname = in_buf_start;
-            remove_user_info(surname);
+            strsep(&in_buf_start, " ");
+            delete_user_info(surname);
         }
-        strsep(&in_buf_start, " ");
     }
     in_buf_start = in_buf_end;
-    // possibly I should do something like this?
-    // *offset = 0;
-    // in_buf_start = in_buf;
-    // in_buf_end = in_buf;
 }
 
 static ssize_t mychardev_write(struct file *file, const char __user *buf, size_t count, loff_t *offset)
@@ -261,6 +327,15 @@ static ssize_t mychardev_write(struct file *file, const char __user *buf, size_t
     in_buf_end = in_buf_start + nbytes;
     printk(KERN_INFO "write nbytes = %d, offset = %d\n", nbytes, (int)*offset);
     process_in_buf();
+
+    // possibly I should do something like this?
+    *offset = 0;
+    int i;
+    for (i = 0; i < BUF_SIZE; ++i) {
+        in_buf[i] = 0;
+    }
+    in_buf_start = in_buf;
+    in_buf_end = in_buf;
     return nbytes;
 }
 
